@@ -1,420 +1,75 @@
 # Gthulhu API Server
 
-Gthulhu API Server is a Golang-based API server designed to integrate the Linux kernel scheduler (sched_ext) with the Kubernetes orchestration system. The core objective of this project is to collect scheduling metrics from eBPF programs and provide intelligent scheduling decisions to the kernel scheduler based on Kubernetes Pod labels and user-defined strategies.
+This project has been refactored into a microservices architecture consisting of two main components: **Manager** and **DecisionMaker**.
 
-## DEMO
+## Architecture Overview
 
-Click the image below to watch our DEMO on YouTube!
+*   **Manager (Port 8080)**:
+    *   Acts as the control plane.
+    *   Handles User/Role management and Scheduling Strategy configuration.
+    *   Persists data to MongoDB.
+    *   Serves the Web UI.
+*   **DecisionMaker (Port 8082)**:
+    *   Runs as a DaemonSet on every K8S Node.
+    *   Receives Metrics from the Scheduler.
+    *   Scans `/proc` for Pod-PID mappings (requires HostPID).
+    *   Issues JWT Tokens for the Scheduler.
 
-[![IMAGE ALT TEXT HERE](https://github.com/Gthulhu/Gthulhu/blob/main/assets/preview.png?raw=true)](https://www.youtube.com/watch?v=R4EmZ18P954)
+## Quick Start (Local Development)
 
-## System Architecture
+### Prerequisites
+*   Go 1.22+
+*   MongoDB (Replica Set required)
+*   MicroK8s / Kubernetes Cluster (optional, for K8S integration)
 
-This API Server adopts a dual-mode architecture, consisting of two independent services:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              Gthulhu Architecture                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│   ┌─────────────┐         ┌─────────────────────┐         ┌─────────────────┐  │
-│   │    User     │ ──────▶ │      Manager        │ ──────▶ │    MongoDB      │  │
-│   │  (Web UI)   │         │ (Central Management)│         │  (Persistence)  │  │
-│   └─────────────┘         └──────────┬──────────┘         └─────────────────┘  │
-│                                      │                                          │
-│                                      │ Query Pods via K8s API                   │
-│                                      ▼                                          │
-│                           ┌─────────────────────┐                               │
-│                           │   Kubernetes API    │                               │
-│                           │   (Pod Informer)    │                               │
-│                           └─────────────────────┘                               │
-│                                      │                                          │
-│              ┌───────────────────────┼───────────────────────┐                  │
-│              │                       │                       │                  │
-│              ▼                       ▼                       ▼                  │
-│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐          │
-│   │ Decision Maker  │     │ Decision Maker  │     │ Decision Maker  │          │
-│   │   (Node 1)      │     │   (Node 2)      │     │   (Node N)      │          │
-│   └────────┬────────┘     └────────┬────────┘     └────────┬────────┘          │
-│            │                       │                       │                    │
-│            ▼                       ▼                       ▼                    │
-│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐          │
-│   │  sched_ext      │     │  sched_ext      │     │  sched_ext      │          │
-│   │ (eBPF Scheduler)│     │ (eBPF Scheduler)│     │ (eBPF Scheduler)│          │
-│   └─────────────────┘     └─────────────────┘     └─────────────────┘          │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Manager Mode
-
-**Purpose**: Serves as the central management service, responsible for handling user requests, managing scheduling strategies, user authentication, and access control.
-
-**Key Features**:
-- User authentication and authorization (JWT Token)
-- Role and permission management (RBAC)
-- CRUD operations for scheduling strategies
-- Monitor Pod status via Kubernetes Informer
-- Distribute scheduling intents to Decision Makers on each node
-- Data persistence to MongoDB
-
-**Default Port**: `:8081`
-
-### Decision Maker Mode
-
-**Purpose**: Deployed on each Kubernetes node (as DaemonSet), responsible for receiving scheduling intents and interacting with the local sched_ext scheduler.
-
-**Key Features**:
-- Receive scheduling intents from Manager
-- Scan `/proc` filesystem to discover Pod processes
-- Convert scheduling strategies into concrete PID-based scheduling decisions
-- Collect eBPF scheduler metrics
-- Expose metrics via Prometheus endpoint
-
-**Default Port**: `:8080`
-
-## Core Features
-
-### Manager Service Features
-- **User Management**: Create, query users, password reset
-- **Role & Permission Management**: RBAC role management, permission assignment
-- **Scheduling Strategy Management**: Create Pod label-based scheduling strategies
-- **Scheduling Intent Tracking**: Track strategy execution status
-- **Kubernetes Integration**: Real-time Pod monitoring via Pod Informer
-- **JWT Authentication**: RSA asymmetric encryption Token authentication
-
-### Decision Maker Service Features
-- **Intent Processing**: Receive and process scheduling intents from Manager
-- **Process Discovery**: Parse cgroup information to map PIDs to Pods
-- **Scheduling Strategy Provider**: Provide concrete PID scheduling strategies to sched_ext
-- **Metrics Collection**: Collect and expose eBPF scheduler metrics to Prometheus
-- **Token Authentication**: Validate requests from Manager
-
-## API Endpoints
-
-### Manager Endpoints
-
-#### System Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/version` | GET | Version information |
-| `/swagger/*` | GET | Swagger documentation |
-
-#### Authentication Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/auth/login` | POST | User login |
-
-#### User Management Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/users` | POST | Create user |
-| `/api/v1/users` | GET | List users |
-| `/api/v1/users/password` | PUT | Reset password |
-| `/api/v1/users/permissions` | PUT | Update permissions |
-| `/api/v1/users/self/password` | PUT | Change own password |
-| `/api/v1/users/self` | GET | Get own information |
-
-#### Role Management Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/roles` | POST | Create role |
-| `/api/v1/roles` | GET | List roles |
-| `/api/v1/roles` | PUT | Update role |
-| `/api/v1/roles` | DELETE | Delete role |
-| `/api/v1/permissions` | GET | List permissions |
-
-#### Scheduling Strategy Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/strategies` | POST | Create scheduling strategy |
-| `/api/v1/strategies/self` | GET | List own strategies |
-| `/api/v1/intents/self` | GET | List own scheduling intents |
-
-### Decision Maker Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/version` | GET | Version information |
-| `/metrics` | GET | Prometheus metrics |
-| `/api/v1/auth/token` | POST | Get authentication token |
-| `/api/v1/intents` | POST | Receive scheduling intents |
-| `/api/v1/scheduling/strategies` | GET | Get scheduling strategies |
-| `/api/v1/metrics` | POST | Update metrics data |
-
-## Data Structures
-
-### ScheduleStrategy
-| Field | Type | Description |
-|-------|------|-------------|
-| `strategyNamespace` | string | Strategy namespace |
-| `labelSelectors` | []LabelSelector | Pod label selectors |
-| `k8sNamespace` | []string | Kubernetes namespaces |
-| `commandRegex` | string | Process command regex |
-| `priority` | int | Priority level |
-| `executionTime` | int64 | Execution time (nanoseconds) |
-
-### ScheduleIntent
-| Field | Type | Description |
-|-------|------|-------------|
-| `podID` | string | Pod UID |
-| `podName` | string | Pod name |
-| `nodeID` | string | Node name |
-| `k8sNamespace` | string | Kubernetes namespace |
-| `commandRegex` | string | Process command regex |
-| `priority` | int | Priority level |
-| `executionTime` | int64 | Execution time (nanoseconds) |
-| `podLabels` | map[string]string | Pod labels |
-| `state` | string | Intent state |
-
-### MetricSet
-| Field | Type | Description |
-|-------|------|-------------|
-| `usersched_last_run_at` | uint64 | User scheduler last run timestamp |
-| `nr_queued` | uint64 | Number of tasks in scheduling queue |
-| `nr_scheduled` | uint64 | Number of scheduled tasks |
-| `nr_running` | uint64 | Number of running tasks |
-| `nr_online_cpus` | uint64 | Number of online CPUs |
-| `nr_user_dispatches` | uint64 | Number of user-space dispatches |
-| `nr_kernel_dispatches` | uint64 | Number of kernel-space dispatches |
-| `nr_cancel_dispatches` | uint64 | Number of cancelled dispatches |
-| `nr_bounce_dispatches` | uint64 | Number of bounce dispatches |
-| `nr_failed_dispatches` | uint64 | Number of failed dispatches |
-| `nr_sched_congested` | uint64 | Number of scheduler congestion events |
-
-## Quick Start
-
-### 0. Test Environment Setup
-
-For local development, you need to set up a MongoDB instance. You can use Docker to start the infrastructure:
-
+### 1. Start MongoDB
 ```bash
-# Start MongoDB using Docker
-$ docker run --rm --network host mongo:6.0 mongosh "mongodb://test:test@localhost:27017/?authSource=admin&authMechanism=SCRAM-SHA-256" --eval 'db.runCommand({ ping: 1 })'
+cd deployment/local
+docker compose -f docker-compose.infra.yaml up -d
 ```
 
-After starting MongoDB, create the required user and verify the connection:
-
+### 2. Start Manager Service
 ```bash
-# Create a test user with root privileges in MongoDB
-$ docker exec mongodb mongosh --eval 'db.getSiblingDB("admin").createUser({user:"test",pwd:"test",roles:[{role:"root",db:"admin"}]})'
-
-# Verify the connection with the created user credentials
-$ docker exec mongodb mongosh "mongodb://test:test@localhost:27017/?authSource=admin&authMechanism=SCRAM-SHA-256" --eval 'db.runCommand({ ping: 1 })'
-```
-
-### 1. Install Dependencies
-```bash
-go mod tidy
-```
-
-### 2. Configuration
-
-#### Manager Configuration (`config/manager_config.toml`)
-```toml
-[server]
-host = ":8081"
-
-[logging]
-level = "info"
-
-[mongodb]
-host = "localhost"
-port = "27017"
-user = "test"
-password = "test"
-database = "manager"
-
-[k8s]
-kube_config_path = "/path/to/.kube/config"
-in_cluster = false
-
-[key]
-rsa_private_key_pem = "..."
-dm_public_key_pem = "..."
-client_id = "your-client-id"
-
-[account]
-admin_email = "admin@example.com"
-admin_password = "your-password"
-```
-
-#### Decision Maker Configuration (`config/dm_config.toml`)
-```toml
-[server]
-host = ":8080"
-
-[logging]
-level = "info"
-
-[token]
-rsa_private_key_pem = "..."
-token_duration_hr = 24
-```
-
-### 3. Start Services
-
-#### Start Manager
-```bash
+# In terminal 1
+cd api
 go run main.go manager
-
-# With custom configuration
-go run main.go manager -c manager_config -d /path/to/config
 ```
+Access Web UI at `http://localhost:8080`
 
-#### Start Decision Maker
+### 3. Start DecisionMaker Service
 ```bash
+# In terminal 2
+cd api
 go run main.go decisionmaker
-
-# With custom configuration
-go run main.go decisionmaker -c dm_config -d /path/to/config
 ```
-
-### 4. Test API
-
-#### Health Check
-```bash
-# Manager
-curl http://localhost:8081/health
-
-# Decision Maker
-curl http://localhost:8080/health
-```
-
-#### User Login
-```bash
-curl -X POST http://localhost:8081/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "admin@example.com",
-    "password": "your-password-here"
-  }'
-```
-
-#### Create Scheduling Strategy
-```bash
-curl -X POST http://localhost:8081/api/v1/strategies \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your-token>" \
-  -d '{
-    "strategyNamespace": "default",
-    "labelSelectors": [
-      {"key": "app", "value": "nginx"}
-    ],
-    "k8sNamespace": ["default"],
-    "priority": 10,
-    "executionTime": 20000000
-  }'
-```
+(Note: DecisionMaker listens on port 8082 by default)
 
 ## Kubernetes Deployment
 
-### Deployment Architecture
-- **Manager**: Deployed as a Deployment, typically single replica
-- **Decision Maker**: Deployed as a DaemonSet on every node
+To deploy in Kubernetes, you need to build two separate images or use different commands for the same image.
 
-### Deployment Manifest Locations
-```
-deployment/
-├── kind/                    # Kind local test environment
-│   ├── local_setup.sh
-│   ├── decisonmaker/
-│   │   ├── daemonset.yaml
-│   │   └── service.yaml
-│   ├── manager/
-│   │   ├── deployment.yaml
-│   │   └── service.yaml
-│   └── mongo/
-│       ├── secret.yaml
-│       ├── service.yaml
-│       └── statefulset.yaml
-└── local/
-    └── docker-compose.infra.yaml  # Docker Compose for local development
-```
-
-### Quick Deployment
+### Build Images
 ```bash
-# Local testing with Kind
-cd deployment/kind
-./local_setup.sh
+# Manager
+docker build -f Dockerfile -t gthulhu-api:latest .
 
-# Or manual deployment
-kubectl apply -f deployment/kind/mongo/
-kubectl apply -f deployment/kind/manager/
-kubectl apply -f deployment/kind/decisonmaker/
+# DecisionMaker
+docker build -f Dockerfile.decisionmaker -t gthulhu-decisionmaker:latest .
 ```
 
-### RBAC Permission Requirements
-Manager requires the following Kubernetes RBAC permissions:
-- `pods`: list, watch, get
-- `namespaces`: list, get
+### Deployment Configuration
+*   **Manager**: Deployment, Service (Port 8080).
+*   **DecisionMaker**: DaemonSet, Service (TargetPort 8082), HostPID: true, Volume Mounts for `/proc`.
 
-## Development Guide
+## API Endpoints
 
-### Project Structure
-```
-.
-├── main.go                 # Entry point, uses Cobra for subcommands
-├── config/                 # Configuration definition and parsing
-├── manager/               # Manager service
-│   ├── app/              # Application initialization
-│   ├── cmd/              # Cobra commands
-│   ├── domain/           # Domain models and interfaces
-│   ├── k8s_adapter/      # Kubernetes client
-│   ├── client/           # Decision Maker client
-│   ├── repository/       # MongoDB data access
-│   ├── rest/             # HTTP handlers
-│   ├── service/          # Business logic
-│   └── migration/        # Database migrations
-├── decisionmaker/        # Decision Maker service
-│   ├── app/             # Application initialization
-│   ├── cmd/             # Cobra commands
-│   ├── domain/          # Domain models
-│   ├── rest/            # HTTP handlers
-│   └── service/         # Business logic and process discovery
-├── pkg/                  # Shared packages
-│   ├── logger/          # Logging utilities
-│   ├── middleware/      # HTTP middleware
-│   └── util/            # Common utility functions
-└── deployment/          # Deployment configurations
-```
+### Manager (8080)
+*   `POST /api/v1/auth/login`: User login
+*   `GET /api/v1/strategies/self`: Get user's strategies
+*   `POST /api/v1/strategies`: Create strategy
 
-### Tech Stack
-- **Web Framework**: Echo v4
-- **Dependency Injection**: Uber fx
-- **CLI**: Cobra
-- **Logging**: zerolog
-- **Database**: MongoDB (mongo-driver v2)
-- **Kubernetes Client**: client-go
-- **Metrics Collection**: Prometheus client_golang
-- **Configuration Management**: Viper
-
-### Build and Test
-```bash
-# Build
-make build
-
-# Run tests
-make test
-
-# Build Docker image
-make image
-```
-
-## Container Images
-
-This project uses GitHub Actions to automatically build and publish to GitHub Container Registry.
-
-```bash
-# Use latest version
-docker pull ghcr.io/gthulhu/api:main
-
-# Use specific version
-docker pull ghcr.io/gthulhu/api:v1.0.0
-```
-
-## License
-
-This project is open source.
+### DecisionMaker (8082)
+*   `POST /api/v1/auth/token`: Get Scheduler Token (Public Key)
+*   `POST /api/v1/metrics`: Report Metrics
+*   `GET /api/v1/metrics`: Get Current Metrics
+*   `GET /api/v1/pods/pids`: Get Pod-PID Mappings
