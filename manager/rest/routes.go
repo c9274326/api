@@ -15,6 +15,9 @@ func (h *Handler) SetupRoutes(engine *echo.Echo) {
 	docs.SwaggerInfo.BasePath = "/"
 	engine.GET("/swagger/*", echoSwagger.WrapHandler)
 
+	// Serve static files for Web UI at root
+	engine.Static("/", "web/static")
+
 	api := engine.Group("/api", echo.WrapMiddleware(LoggerMiddleware))
 	// v1 routes
 	{

@@ -16,7 +16,7 @@ const authModal = document.getElementById('authModal');
 const authForm = document.getElementById('authForm');
 
 // Initialize the app
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     updateAuthStatus();
     setupEventListeners();
     updateAuthRequiredButtons();
@@ -44,7 +44,7 @@ function updateAuthRequiredButtons() {
     authRequiredElements.forEach(element => {
         element.disabled = !isAuthenticated;
     });
-    
+
     // Stop metrics auto-refresh if user is not authenticated
     if (!isAuthenticated && metricsInterval) {
         clearInterval(metricsInterval);
@@ -82,30 +82,105 @@ function clearToken() {
 // Setup event listeners
 function setupEventListeners() {
     // Close modal when clicking outside
-    window.onclick = function(event) {
+    window.onclick = function (event) {
         if (event.target === authModal) {
             hideAuthModal();
         }
     }
 
-    // Auth form submission
-    authForm.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        await getJWTToken();
-    });
+    // Password login form submission
+    const passwordForm = document.getElementById('passwordAuthForm');
+    if (passwordForm) {
+        passwordForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            await loginWithPassword();
+        });
+    }
+
+    // Public key form submission
+    const publicKeyForm = document.getElementById('publicKeyAuthForm');
+    if (publicKeyForm) {
+        publicKeyForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            await getJWTToken();
+        });
+    }
+}
+
+// Switch auth tab
+function switchAuthTab(tabType) {
+    const tabs = document.querySelectorAll('.auth-tab');
+    tabs.forEach(tab => tab.classList.remove('active'));
+
+    const passwordForm = document.getElementById('passwordAuthForm');
+    const publicKeyForm = document.getElementById('publicKeyAuthForm');
+
+    if (tabType === 'password') {
+        tabs[0].classList.add('active');
+        passwordForm.style.display = 'block';
+        publicKeyForm.style.display = 'none';
+    } else {
+        tabs[1].classList.add('active');
+        passwordForm.style.display = 'none';
+        publicKeyForm.style.display = 'block';
+    }
+}
+
+// Login with username/password (Manager API)
+async function loginWithPassword() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+
+    if (!username || !password) {
+        showResult('authResult', 'Please enter username and password', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                username: username,
+                password: password
+            })
+        });
+
+        const data = await response.json();
+        console.log('Login response:', data);
+
+        const tokenData = data.data || data;
+        if (data.success && tokenData.token) {
+            jwtToken = tokenData.token;
+            isAuthenticated = true;
+            localStorage.setItem('jwtToken', jwtToken);
+            updateAuthStatus();
+            hideAuthModal();
+            showResult('authResult', 'Login successful!', 'success');
+        } else {
+            showResult('authResult', 'Login failed: ' + (data.error || data.message || 'Invalid credentials'), 'error');
+        }
+    } catch (error) {
+        showResult('authResult', 'Request failed: ' + error.message, 'error');
+    }
 }
 
 // Get JWT Token
 async function getJWTToken() {
     const publicKey = document.getElementById('publicKey').value.trim();
-    
+
     if (!publicKey) {
         alert('Please enter public key');
         return;
     }
 
     try {
-        const response = await fetch('/api/v1/auth/token', {
+        // Token endpoint is on DecisionMaker (port 8082)
+        const dmPort = window.location.port === '8080' ? '8082' : window.location.port;
+        const dmBaseUrl = `${window.location.protocol}//${window.location.hostname}:${dmPort}`;
+        const response = await fetch(`${dmBaseUrl}/api/v1/auth/token`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -116,16 +191,19 @@ async function getJWTToken() {
         });
 
         const data = await response.json();
-        
-        if (data.success && data.token) {
-            jwtToken = data.token;
+        console.log('Token response:', data); // Debug
+
+        // Token is in data.data.token (nested structure from NewSuccessResponse)
+        const tokenData = data.data || data;
+        if (data.success && tokenData.token) {
+            jwtToken = tokenData.token;
             isAuthenticated = true;
             localStorage.setItem('jwtToken', jwtToken);
             updateAuthStatus();
             hideAuthModal();
             showResult('authResult', 'Authentication successful!', 'success');
         } else {
-            showResult('authResult', 'Authentication failed: ' + (data.error || data.message), 'error');
+            showResult('authResult', 'Authentication failed: ' + (data.error || data.message || 'Unknown error'), 'error');
         }
     } catch (error) {
         showResult('authResult', 'Request failed: ' + error.message, 'error');
@@ -156,22 +234,22 @@ async function checkHealth() {
         const response = await fetch('/health');
         const data = await response.json();
         const isHealthy = response.ok && data.status == "healthy";
-        
+
         // Add to health history
         healthHistory.push({
             timestamp: new Date().toISOString(),
             healthy: isHealthy,
             data: data
         });
-        
+
         // Keep only last 10 results
         if (healthHistory.length > 10) {
             healthHistory.shift();
         }
-        
+
         // Update health grid
         updateHealthGrid();
-        
+
         showResult('healthResult', JSON.stringify(data, null, 2), isHealthy ? 'success' : 'error');
     } catch (error) {
         // Add error to health history
@@ -180,25 +258,35 @@ async function checkHealth() {
             healthy: false,
             error: error.message
         });
-        
+
         // Keep only last 10 results
         if (healthHistory.length > 10) {
             healthHistory.shift();
         }
-        
+
         // Update health grid
         updateHealthGrid();
-        
+
         showResult('healthResult', 'Request failed: ' + error.message, 'error');
     }
 }
 
-// Get Pod-PID mappings
+// Get Pod-PID mappings (from DecisionMaker on port 8082)
 async function getPodPids() {
     try {
-        const response = await makeAuthenticatedRequest('/api/v1/pods/pids');
+        // Pod-PID endpoint is on DecisionMaker (port 8082)
+        const dmPort = window.location.port === '8080' ? '8082' : window.location.port;
+        const dmBaseUrl = `${window.location.protocol}//${window.location.hostname}:${dmPort}`;
+
+        const response = await fetch(`${dmBaseUrl}/api/v1/pods/pids`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${jwtToken}`
+            }
+        });
         const data = await response.json();
-        
+
         if (data.success) {
             showResult('podPidsResult', JSON.stringify(data, null, 2), 'success');
         } else {
@@ -212,9 +300,9 @@ async function getPodPids() {
 // Get scheduling strategies
 async function getStrategies() {
     try {
-        const response = await makeAuthenticatedRequest('/api/v1/scheduling/strategies');
+        const response = await makeAuthenticatedRequest('/api/v1/strategies/self');
         const data = await response.json();
-        
+
         if (data.success) {
             showResult('strategiesResult', JSON.stringify(data, null, 2), 'success');
         } else {
@@ -230,7 +318,7 @@ async function saveAllStrategies() {
     try {
         const strategies = [];
         const strategyItems = document.querySelectorAll('.strategy-item');
-        
+
         for (const item of strategyItems) {
             const strategy = {
                 priority: item.querySelector('input[name="priority"]')?.checked || false,
@@ -252,7 +340,7 @@ async function saveAllStrategies() {
             // Collect selectors
             const selectors = [];
             const selectorItems = item.querySelectorAll('.selector');
-            
+
             for (const selectorItem of selectorItems) {
                 const key = selectorItem.querySelector('input[name="selectorKey"]')?.value?.trim();
                 const value = selectorItem.querySelector('input[name="selectorValue"]')?.value?.trim();
@@ -260,7 +348,7 @@ async function saveAllStrategies() {
                     selectors.push({ key, value });
                 }
             }
-            
+
             strategy.selectors = selectors;
             strategies.push(strategy);
         }
@@ -272,13 +360,13 @@ async function saveAllStrategies() {
 
         const requestBody = { strategies };
 
-        const response = await makeAuthenticatedRequest('/api/v1/scheduling/strategies', {
+        const response = await makeAuthenticatedRequest('/api/v1/strategies', {
             method: 'POST',
             body: JSON.stringify(requestBody)
         });
 
         const data = await response.json();
-        
+
         if (data.success) {
             showResult('strategiesResult', `Successfully saved ${strategies.length} strategies: ` + JSON.stringify(data, null, 2), 'success');
         } else {
@@ -293,11 +381,11 @@ async function saveAllStrategies() {
 function addStrategy() {
     const container = document.getElementById('strategiesContainer');
     const strategyId = `strategy-${++strategyCounter}`;
-    
+
     const strategyDiv = document.createElement('div');
     strategyDiv.className = 'strategy-item';
     strategyDiv.id = strategyId;
-    
+
     strategyDiv.innerHTML = `
         <h4>
             Strategy ${strategyCounter}
@@ -334,7 +422,7 @@ function addStrategy() {
             </div>
         </div>
     `;
-    
+
     container.appendChild(strategyDiv);
 }
 
@@ -344,7 +432,7 @@ function removeStrategy(strategyId) {
     if (strategyItem) {
         strategyItem.remove();
     }
-    
+
     // If no strategies left, add one
     const container = document.getElementById('strategiesContainer');
     if (container.children.length === 0) {
@@ -374,15 +462,23 @@ function addSelectorToStrategy(strategyId) {
     selectorsContainer.appendChild(selectorDiv);
 }
 
-// Get current metrics (replaces submitMetrics)
+// Get current metrics (from DecisionMaker on port 8082)
 async function getMetrics() {
     try {
-        const response = await makeAuthenticatedRequest('/api/v1/metrics', {
-            method: 'GET'
+        // Metrics endpoint is on DecisionMaker (port 8082)
+        const dmPort = window.location.port === '8080' ? '8082' : window.location.port;
+        const dmBaseUrl = `${window.location.protocol}//${window.location.hostname}:${dmPort}`;
+
+        const response = await fetch(`${dmBaseUrl}/api/v1/metrics`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${jwtToken}`
+            }
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success && data.data) {
             // Format the metrics data nicely
             const metrics = data.data;
@@ -400,7 +496,7 @@ async function getMetrics() {
                 "Failed Dispatches": metrics.nr_failed_dispatches,
                 "Scheduler Congested": metrics.nr_sched_congested
             };
-            
+
             showResult('metricsResult', JSON.stringify(formattedMetrics, null, 2), 'success');
         } else {
             showResult('metricsResult', data.message || 'No metrics data available', 'info');
@@ -422,7 +518,7 @@ function removeSelector(button) {
     const selectorDiv = button.parentElement;
     const parentContainer = selectorDiv.parentElement;
     selectorDiv.remove();
-    
+
     // Ensure at least one selector remains in each strategy
     if (parentContainer.children.length === 0) {
         const strategyId = parentContainer.id.replace('selectors-', '');
@@ -462,13 +558,13 @@ bNaGj75Gj0sN+LfjjQ4A898CAwEAAQ==
 function updateHealthGrid() {
     const healthGrid = document.getElementById('healthGrid');
     if (!healthGrid) return;
-    
+
     healthGrid.innerHTML = '';
-    
+
     // Fill empty slots if we have less than 10 results
     const totalSlots = 10;
     const emptySlots = totalSlots - healthHistory.length;
-    
+
     // Add empty slots first
     for (let i = 0; i < emptySlots; i++) {
         const box = document.createElement('div');
@@ -478,7 +574,7 @@ function updateHealthGrid() {
         box.title = 'No data';
         healthGrid.appendChild(box);
     }
-    
+
     // Add actual health results
     healthHistory.forEach((result, index) => {
         const box = document.createElement('div');
@@ -493,7 +589,7 @@ function updateHealthGrid() {
 function toggleHealthAutoRefresh() {
     const btn = document.getElementById('healthAutoBtn');
     const intervalInput = document.getElementById('healthInterval');
-    
+
     if (healthInterval) {
         // Stop auto-refresh
         clearInterval(healthInterval);
@@ -507,11 +603,11 @@ function toggleHealthAutoRefresh() {
             alert('Interval must be at least 1 second');
             return;
         }
-        
+
         healthInterval = setInterval(checkHealth, interval);
         btn.textContent = 'Stop Auto-refresh';
         intervalInput.disabled = true;
-        
+
         // Do an immediate check
         checkHealth();
     }
@@ -521,7 +617,7 @@ function toggleHealthAutoRefresh() {
 function toggleMetricsAutoRefresh() {
     const btn = document.getElementById('metricsAutoBtn');
     const intervalInput = document.getElementById('metricsInterval');
-    
+
     if (metricsInterval) {
         // Stop auto-refresh
         clearInterval(metricsInterval);
@@ -535,16 +631,16 @@ function toggleMetricsAutoRefresh() {
             alert('Interval must be at least 1 second');
             return;
         }
-        
+
         if (!isAuthenticated) {
             alert('Authentication required for metrics auto-refresh');
             return;
         }
-        
+
         metricsInterval = setInterval(getMetrics, interval);
         btn.textContent = 'Stop Auto-refresh';
         intervalInput.disabled = true;
-        
+
         // Do an immediate check
         getMetrics();
     }
