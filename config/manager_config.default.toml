@@ -97,5 +97,5 @@ admin_email = "admin@example.com"
 admin_password = "your-password-here"
 
 [k8s]
-kube_config_path = "/path/to/kubeconfig"
+kube_config_path = "/home/ubuntu/.kube/config"
 in_cluster = false

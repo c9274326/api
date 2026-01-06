@@ -1,5 +1,5 @@
 [server]
-host = ":8080"
+host = ":8082"
 
 
 [logging]
@@ -8,6 +8,7 @@ path = "logs/app.log"
 
 [token]
 enable = true
+token_duration_hr = 24
 rsa_private_key_pem = """
 -----BEGIN RSA PRIVATE KEY-----
 MIIJJwIBAAKCAgEAny28YMC2/+yYj3T29lz60uryNz8gNVrqD7lTJuHQ3DMTE6AD
@@ -61,4 +62,3 @@ spxkAVwlY6g1ZER7IFXlzhz6wYuDBayRhA/2zBPgtGesfpTd7H24AlJ6qB+mThHs
 X6m7Mp9nAMhRyXhULslO3trWFbFCa2dbQkDSyBRvsb2HZtztoLVyo1mtUg==
 -----END RSA PRIVATE KEY-----
 """
-token_duration_hr = 24
