@@ -240,3 +240,8 @@ func (svc *Service) getProcessInfo(rootDir string, pid int) (domain.PodProcess, 
 func (svc *Service) UpdateMetrics(ctx context.Context, newMetricSet *domain.MetricSet) {
 	svc.metricCollector.UpdateMetrics(newMetricSet)
 }
+
+// GetMetrics returns the current metrics
+func (svc *Service) GetMetrics(ctx context.Context) *domain.MetricSet {
+	return svc.metricCollector.GetMetrics()
+}

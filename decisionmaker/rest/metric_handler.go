@@ -46,3 +46,41 @@ func (h *Handler) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 	h.Service.UpdateMetrics(r.Context(), newMetricSet)
 	h.JSONResponse(ctx, w, http.StatusOK, NewSuccessResponse[EmptyResponse](nil))
 }
+
+// GetMetrics handles retrieving current metrics
+func (h *Handler) GetMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	metrics := h.Service.GetMetrics(ctx)
+	if metrics == nil {
+		h.JSONResponse(ctx, w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "No metrics data available yet. Waiting for scheduler to report metrics.",
+			"data":    nil,
+		})
+		return
+	}
+	h.JSONResponse(ctx, w, http.StatusOK, NewSuccessResponse[domain.MetricSet](metrics))
+}
+
+// GetPodPids handles retrieving Pod-PID mappings
+func (h *Handler) GetPodPids(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	podInfos, err := h.Service.GetAllPodInfos(ctx)
+	if err != nil {
+		h.ErrorResponse(ctx, w, http.StatusInternalServerError, "Failed to get pod-pid mappings", err)
+		return
+	}
+
+	// Convert map to slice for JSON response
+	pods := make([]*domain.PodInfo, 0, len(podInfos))
+	for _, podInfo := range podInfos {
+		pods = append(pods, podInfo)
+	}
+
+	h.JSONResponse(ctx, w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"message":   "Pod-PID mappings retrieved successfully",
+		"timestamp": r.Context().Value("timestamp"),
+		"pods":      pods,
+	})
+}

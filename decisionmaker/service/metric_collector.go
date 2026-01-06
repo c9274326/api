@@ -142,3 +142,8 @@ func (collector *MetricCollector) Collect(ch chan<- prometheus.Metric) {
 func (collector *MetricCollector) UpdateMetrics(newMetricSet *domain.MetricSet) {
 	collector.metricSet.Store(newMetricSet)
 }
+
+// GetMetrics returns the current metric set
+func (collector *MetricCollector) GetMetrics() *domain.MetricSet {
+	return collector.metricSet.Load()
+}

@@ -164,6 +164,8 @@ func (h *Handler) SetupRoutes(engine *echo.Echo) error {
 		apiV1.POST("/intents", h.echoHandler(h.HandleIntents), echo.WrapMiddleware(authMiddleware))
 		apiV1.GET("/scheduling/strategies", h.echoHandler(h.ListIntents), echo.WrapMiddleware(authMiddleware))
 		apiV1.POST("/metrics", h.echoHandler(h.UpdateMetrics), echo.WrapMiddleware(authMiddleware))
+		apiV1.GET("/metrics", h.echoHandler(h.GetMetrics), echo.WrapMiddleware(authMiddleware))
+		apiV1.GET("/pods/pids", h.echoHandler(h.GetPodPids), echo.WrapMiddleware(authMiddleware))
 		// token routes
 		apiV1.POST("/auth/token", h.echoHandler(h.GenTokenHandler))
 	}
